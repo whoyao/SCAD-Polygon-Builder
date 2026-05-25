@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>OpenSCAD Polygon Editor</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Menlo', monospace; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; }
+#sidebar {
+  width: 420px; min-width: 420px; padding: 20px; background: #16213e;
+  display: flex; flex-direction: column; gap: 14px; overflow-y: auto;
+}
+h2 { font-size: 16px; color: #00d2ff; }
+h3 { font-size: 13px; color: #888; margin-bottom: 6px; }
+#canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+canvas { background: #0f0f23; border: 1px solid #333; }
+
+.point-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  background: #1a1a2e; border-radius: 4px; font-size: 13px; cursor: pointer;
+  position: relative;
+}
+.point-row:hover { background: #2a2a4e; }
+.point-row.active { background: #0a3d62; border: 1px solid #00d2ff; }
+.point-row.drag-over-top { box-shadow: 0 -2px 0 0 #ffd93d; }
+.point-row.drag-over-bot { box-shadow: 0 2px 0 0 #ffd93d; }
+.point-row .drag-handle {
+  cursor: grab; color: #555; font-size: 14px; user-select: none; padding: 0 2px;
+}
+.point-row .drag-handle:hover { color: #aaa; }
+.point-row .order-btns { display: flex; flex-direction: column; gap: 0; margin-left: auto; }
+.point-row .order-btn {
+  background: none; border: none; color: #666; cursor: pointer;
+  font-size: 10px; line-height: 1; padding: 0 3px;
+}
+.point-row .order-btn:hover { color: #fff; }
+.point-row input {
+  width: 70px; background: #0f0f23; border: 1px solid #444; color: #fff;
+  padding: 3px 6px; border-radius: 3px; font-family: inherit; font-size: 13px; text-align: right;
+}
+.point-row .idx { color: #00d2ff; width: 20px; text-align: center; }
+.point-row .del-btn {
+  background: none; border: none; color: #e74c3c; cursor: pointer;
+  font-size: 16px; padding: 0 4px; opacity: 0.5;
+}
+.point-row .del-btn:hover { opacity: 1; }
+
+#code-output {
+  background: #0f0f23; padding: 12px; border-radius: 6px; font-size: 12px;
+  white-space: pre; overflow-x: auto; line-height: 1.6; border: 1px solid #333;
+  max-height: 260px; overflow-y: auto; user-select: all;
+}
+.btn {
+  padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+}
+.btn-primary { background: #00d2ff; color: #000; }
+.btn-primary:hover { background: #00b8e6; }
+.btn-secondary { background: #444; color: #fff; }
+.btn-secondary:hover { background: #555; }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+#point-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+.status { font-size: 12px; color: #888; }
+#bx-input {
+  width: 70px; background: #0f0f23; border: 1px solid #444; color: #00d2ff;
+  padding: 3px 6px; border-radius: 3px; font-family: inherit; font-size: 13px; text-align: right;
+}
+.param-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+#mode-hud {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  background: #000c; backdrop-filter: blur(8px); padding: 10px 24px;
+  border-radius: 8px; font-size: 15px; font-weight: 700; z-index: 100;
+  border: 2px solid #555; display: none; text-align: center; line-height: 1.6;
+}
+#mode-hud .key {
+  display: inline-block; background: #333; border: 1px solid #666;
+  border-radius: 4px; padding: 1px 8px; font-size: 13px; min-width: 28px; text-align: center;
+}
+#mode-hud.grab { border-color: #ffd93d; color: #ffd93d; }
+#mode-hud.grab-x { border-color: #ff6b6b; color: #ff6b6b; }
+#mode-hud.grab-y { border-color: #4ecdc4; color: #4ecdc4; }
+#mode-hud .num-input {
+  font-size: 22px; font-weight: 900; letter-spacing: 1px;
+  background: #0008; padding: 2px 10px; border-radius: 4px;
+  border-bottom: 2px solid currentColor; margin-left: 6px;
+  min-width: 60px; display: inline-block;
+}
+#mode-hud .num-input .cursor {
+  animation: blink 0.6s step-end infinite; border-right: 2px solid currentColor;
+}
+@keyframes blink { 50% { border-color: transparent; } }
+
+#shortcut-help {
+  background: #0f0f23; border: 1px solid #333; border-radius: 6px;
+  padding: 10px 14px; font-size: 12px; line-height: 1.8;
+}
+#shortcut-help .key {
+  display: inline-block; background: #333; border: 1px solid #555;
+  border-radius: 3px; padding: 0 6px; font-size: 11px; min-width: 22px; text-align: center;
+}
+</style>
+</head>
+<body>
+
+<div id="mode-hud"></div>
+
+<div id="sidebar">
+  <h2>OpenSCAD Polygon Editor</h2>
+  <div class="param-row">
+    <label>bx =</label>
+    <input type="number" id="bx-input" value="24" step="0.05">
+    <span class="status">(base_x / 2)</span>
+  </div>
+  <h3>Points (X, Z)</h3>
+  <div id="point-list"></div>
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="addPoint()">+ Add Point</button>
+    <button class="btn btn-secondary" onclick="resetPoints()">Reset</button>
+    <button class="btn btn-secondary" onclick="copyCode()">Copy Code</button>
+  </div>
+  <h3>OpenSCAD Output</h3>
+  <div id="code-output"></div>
+  <div id="shortcut-help">
+    <span class="key">Click</span> Select &nbsp;
+    <span class="key">G</span> Grab &nbsp;
+    <span class="key">X</span> Lock X &nbsp;
+    <span class="key">Y</span> Lock Y &nbsp;
+    <span class="key">Enter</span> / <span class="key">Click</span> Confirm<br>
+    <span class="key">Esc</span> / <span class="key">RMB</span> Cancel &nbsp;
+    <span class="key">Del</span> Delete &nbsp;
+    <span class="key">RMB</span> Insert on edge &nbsp;
+    <span class="key">Scroll</span> Zoom<br>
+    <span class="key">0-9</span> <span class="key">.</span> <span class="key">-</span> Type offset (in G+X / G+Y) &nbsp;
+    <span class="key">Tab</span> Switch axis<br>
+    <span class="key">&#8984;Z</span> Undo &nbsp;
+    <span class="key">&#8984;&#8679;Z</span> Redo
+  </div>
+  <div class="status" id="status-bar">Select a point, then G to grab.</div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="cv" tabindex="0"></canvas>
+</div>
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const hud = document.getElementById('mode-hud');
+
+// --- Data ---
+let bx = 24;
+let points = [
+  [null, 7],      // bx reference
+  [26.15, 11],
+  [26.15, 26.4],
+  [17.85, 26.4],
+  [17.85, 25.3],
+  [21.85, 25.3],
+  [21.85, 14],
+  [null, 14],     // bx reference
+];
+
+let activeIdx = -1;
+let hoverIdx = -1;
+
+// --- Undo / Redo ---
+let undoStack = [];
+let redoStack = [];
+const MAX_UNDO = 100;
+
+function saveUndo() {
+  undoStack.push({ pts: points.map(p => [p[0], p[1]]), bx: bx, idx: activeIdx });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push({ pts: points.map(p => [p[0], p[1]]), bx: bx, idx: activeIdx });
+  let state = undoStack.pop();
+  points = state.pts;
+  bx = state.bx;
+  document.getElementById('bx-input').value = bx;
+  activeIdx = state.idx;
+  updateList(); updateCode(); draw();
+  setStatus(`Undo (${undoStack.length} left)`);
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push({ pts: points.map(p => [p[0], p[1]]), bx: bx, idx: activeIdx });
+  let state = redoStack.pop();
+  points = state.pts;
+  bx = state.bx;
+  document.getElementById('bx-input').value = bx;
+  activeIdx = state.idx;
+  updateList(); updateCode(); draw();
+  setStatus(`Redo (${redoStack.length} left)`);
+}
+
+// --- Grab mode state ---
+// mode: 'idle' | 'grab' | 'grab-x' | 'grab-y'
+let mode = 'idle';
+let grabOrigin = [0, 0];     // world coords when G was pressed
+let grabOrigPt = [0, 0];     // original point value before grab
+let grabMouse = [0, 0];      // current mouse screen coords
+let numInput = '';            // numeric keyboard input buffer
+let numActive = false;        // true when user is typing a number
+
+// --- View ---
+let viewX = 0, viewY = 0, viewScale = 1;
+const PADDING = 60;
+
+function getEffective(p) {
+  return [p[0] === null ? bx : p[0], p[1]];
+}
+
+function fitView() {
+  const W = cv.width, H = cv.height;
+  let xs = points.map(p => getEffective(p)[0]);
+  let ys = points.map(p => getEffective(p)[1]);
+  let xmin = Math.min(...xs) - 5, xmax = Math.max(...xs) + 5;
+  let ymin = Math.min(...ys) - 5, ymax = Math.max(...ys) + 5;
+  let sx = (W - PADDING * 2) / (xmax - xmin);
+  let sy = (H - PADDING * 2) / (ymax - ymin);
+  viewScale = Math.min(sx, sy);
+  viewX = W / 2 - (xmin + xmax) / 2 * viewScale;
+  viewY = H / 2 + (ymin + ymax) / 2 * viewScale;
+}
+
+function toScreen(wx, wy) {
+  return [wx * viewScale + viewX, -wy * viewScale + viewY];
+}
+function toWorld(sx, sy) {
+  return [(sx - viewX) / viewScale, -(sy - viewY) / viewScale];
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  cv.width = wrap.clientWidth - 40;
+  cv.height = wrap.clientHeight - 40;
+  fitView(); draw();
+}
+
+function snap(v) { return Math.round(v * 20) / 20; }
+
+// --- HUD ---
+function updateHUD() {
+  if (mode === 'idle') {
+    hud.style.display = 'none';
+    hud.className = '';
+    cv.style.cursor = 'crosshair';
+    return;
+  }
+  hud.style.display = 'block';
+  let numHtml = numActive
+    ? `<span class="num-input">${numInput || '0'}<span class="cursor">&thinsp;</span></span>`
+    : '';
+  if (mode === 'grab') {
+    hud.className = 'grab';
+    hud.innerHTML = 'Grab (free) &nbsp; <span class="key">X</span> <span class="key">Y</span> to lock axis &nbsp; type number to set value';
+    cv.style.cursor = 'grabbing';
+  } else if (mode === 'grab-x') {
+    hud.className = 'grab-x';
+    hud.innerHTML = `Grab <b>X</b> offset: ${numHtml}` +
+      (numActive ? '' : ' &nbsp; type offset or move mouse');
+    cv.style.cursor = numActive ? 'default' : 'ew-resize';
+  } else if (mode === 'grab-y') {
+    hud.className = 'grab-y';
+    hud.innerHTML = `Grab <b>Y</b> offset: ${numHtml}` +
+      (numActive ? '' : ' &nbsp; type offset or move mouse');
+    cv.style.cursor = numActive ? 'default' : 'ns-resize';
+  }
+}
+
+function setStatus(msg) {
+  document.getElementById('status-bar').textContent = msg;
+}
+
+// --- Drawing ---
+function drawGrid() {
+  const W = cv.width, H = cv.height;
+  let rawStep = 50 / viewScale;
+  let mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  let step = mag;
+  if (rawStep / mag > 5) step = mag * 10;
+  else if (rawStep / mag > 2) step = mag * 5;
+  else if (rawStep / mag > 1) step = mag * 2;
+
+  let [wx0, wy0] = toWorld(0, H);
+  let [wx1, wy1] = toWorld(W, 0);
+
+  ctx.strokeStyle = '#1a2a3a';
+  ctx.lineWidth = 0.5;
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#445';
+
+  let startX = Math.floor(wx0 / step) * step;
+  for (let x = startX; x <= wx1; x += step) {
+    let [sx] = toScreen(x, 0);
+    ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
+    ctx.fillText(x.toFixed(1), sx + 2, H - 4);
+  }
+  let startY = Math.floor(wy0 / step) * step;
+  for (let y = startY; y <= wy1; y += step) {
+    let [, sy] = toScreen(0, y);
+    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+    ctx.fillText(y.toFixed(1), 4, sy - 3);
+  }
+
+  // Axes
+  ctx.strokeStyle = '#335'; ctx.lineWidth = 1;
+  let [ax, ay] = toScreen(0, 0);
+  ctx.beginPath(); ctx.moveTo(ax, 0); ctx.lineTo(ax, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, ay); ctx.lineTo(W, ay); ctx.stroke();
+
+  // bx reference line
+  let [bxs] = toScreen(bx, 0);
+  ctx.strokeStyle = '#00d2ff33'; ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.moveTo(bxs, 0); ctx.lineTo(bxs, H); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#00d2ff66';
+  ctx.fillText('bx=' + bx, bxs + 4, 14);
+}
+
+function draw() {
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  drawGrid();
+
+  if (points.length < 2) { drawPoints(); return; }
+
+  // Polygon fill + stroke
+  ctx.beginPath();
+  let ep = points.map(p => getEffective(p));
+  let [sx0, sy0] = toScreen(ep[0][0], ep[0][1]);
+  ctx.moveTo(sx0, sy0);
+  for (let i = 1; i < ep.length; i++) {
+    let [sx, sy] = toScreen(ep[i][0], ep[i][1]);
+    ctx.lineTo(sx, sy);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#00d2ff15';
+  ctx.fill();
+  ctx.strokeStyle = '#00d2ff88';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Direction arrows
+  for (let i = 0; i < ep.length; i++) {
+    let j = (i + 1) % ep.length;
+    let [x1, y1] = toScreen(ep[i][0], ep[i][1]);
+    let [x2, y2] = toScreen(ep[j][0], ep[j][1]);
+    let mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    let dx = x2 - x1, dy = y2 - y1;
+    let len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 30) {
+      let ux = dx / len, uy = dy / len;
+      ctx.beginPath();
+      ctx.moveTo(mx + ux * 6, my + uy * 6);
+      ctx.lineTo(mx - ux * 4 - uy * 4, my - uy * 4 + ux * 4);
+      ctx.lineTo(mx - ux * 4 + uy * 4, my - uy * 4 - ux * 4);
+      ctx.closePath();
+      ctx.fillStyle = '#00d2ff44';
+      ctx.fill();
+    }
+  }
+
+  // Axis constraint guide line during grab
+  if (mode !== 'idle' && activeIdx >= 0) {
+    let [ox, oy] = toScreen(grabOrigPt[0] === null ? bx : grabOrigPt[0], grabOrigPt[1]);
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.5;
+    if (mode === 'grab-x') {
+      ctx.strokeStyle = '#ff6b6b88';
+      ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
+    } else if (mode === 'grab-y') {
+      ctx.strokeStyle = '#4ecdc488';
+      ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Ghost of original position
+    ctx.beginPath();
+    ctx.arc(ox, oy, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffffff44';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  drawPoints();
+}
+
+function drawPoints() {
+  for (let i = 0; i < points.length; i++) {
+    let [wx, wy] = getEffective(points[i]);
+    let [sx, sy] = toScreen(wx, wy);
+    let isActive = i === activeIdx;
+    let isHover = i === hoverIdx;
+    let isBx = points[i][0] === null;
+    let r = (isActive || isHover) ? 8 : 6;
+
+    // Glow for active point in grab mode
+    if (isActive && mode !== 'idle') {
+      ctx.beginPath();
+      ctx.arc(sx, sy, 14, 0, Math.PI * 2);
+      let glowColor = mode === 'grab-x' ? '#ff6b6b33' : mode === 'grab-y' ? '#4ecdc433' : '#ffd93d33';
+      ctx.fillStyle = glowColor;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    if (isActive) {
+      ctx.fillStyle = mode !== 'idle' ? '#ffd93d' : '#ff6b6b';
+      ctx.strokeStyle = '#fff';
+    } else if (isHover) {
+      ctx.fillStyle = '#ffd93d';
+      ctx.strokeStyle = '#fff';
+    } else if (isBx) {
+      ctx.fillStyle = '#00d2ff';
+      ctx.strokeStyle = '#00d2ff';
+    } else {
+      ctx.fillStyle = '#4ecdc4';
+      ctx.strokeStyle = '#fff';
+    }
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = '11px monospace';
+    let label = `[${isBx ? 'bx' : wx.toFixed(2)}, ${wy.toFixed(1)}]`;
+    ctx.fillText(i + ': ' + label, sx + 12, sy - 8);
+  }
+}
+
+function findPoint(mx, my) {
+  let best = -1, bestD = 15;
+  for (let i = 0; i < points.length; i++) {
+    let [wx, wy] = getEffective(points[i]);
+    let [sx, sy] = toScreen(wx, wy);
+    let d = Math.sqrt((mx - sx) ** 2 + (my - sy) ** 2);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  let dx = x2 - x1, dy = y2 - y1;
+  let len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+  let t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2));
+  let projX = x1 + t * dx, projY = y1 + t * dy;
+  return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+}
+
+// --- Grab logic ---
+function startGrab() {
+  if (activeIdx < 0) return;
+  saveUndo();
+  let ep = getEffective(points[activeIdx]);
+  grabOrigPt = [points[activeIdx][0], points[activeIdx][1]];
+  grabOrigin = [ep[0], ep[1]];
+  mode = 'grab';
+  numInput = '';
+  numActive = false;
+  updateHUD();
+  setStatus('G: free move. Press X or Y to lock axis, then type value. Enter to confirm.');
+  draw();
+}
+
+function applyNumValue(delta) {
+  if (activeIdx < 0 || isNaN(delta)) return;
+  let isBx = grabOrigPt[0] === null;
+  let origX = isBx ? bx : grabOrigPt[0];
+  if (mode === 'grab-x') {
+    if (!isBx) points[activeIdx][0] = origX + delta;
+    points[activeIdx][1] = grabOrigPt[1];
+  } else if (mode === 'grab-y') {
+    if (!isBx) points[activeIdx][0] = grabOrigPt[0];
+    points[activeIdx][1] = grabOrigPt[1] + delta;
+  }
+  updateList(); updateCode(); draw();
+}
+
+function applyGrab(screenX, screenY) {
+  if (activeIdx < 0) return;
+  let [wx, wy] = toWorld(screenX, screenY);
+  wx = snap(wx); wy = snap(wy);
+  let isBx = grabOrigPt[0] === null;
+
+  if (mode === 'grab') {
+    // Free move
+    if (isBx) {
+      points[activeIdx][1] = wy;
+    } else {
+      points[activeIdx][0] = wx;
+      points[activeIdx][1] = wy;
+    }
+  } else if (mode === 'grab-x') {
+    // Only move X, keep original Y(Z)
+    if (!isBx) {
+      points[activeIdx][0] = wx;
+    }
+    points[activeIdx][1] = grabOrigPt[1];
+  } else if (mode === 'grab-y') {
+    // Only move Y(Z), keep original X
+    if (!isBx) {
+      points[activeIdx][0] = grabOrigPt[0] === null ? null : (grabOrigPt[0]);
+    }
+    points[activeIdx][1] = wy;
+  }
+  updateList(); updateCode(); draw();
+}
+
+function confirmGrab() {
+  numInput = ''; numActive = false;
+  mode = 'idle';
+  updateHUD();
+  setStatus('Confirmed. Select a point, then G to grab.');
+  draw();
+}
+
+function cancelGrab() {
+  if (activeIdx >= 0) {
+    points[activeIdx][0] = grabOrigPt[0];
+    points[activeIdx][1] = grabOrigPt[1];
+  }
+  undoStack.pop(); // nothing changed, discard the undo entry
+  numInput = ''; numActive = false;
+  mode = 'idle';
+  updateHUD();
+  updateList(); updateCode(); draw();
+  setStatus('Cancelled. Select a point, then G to grab.');
+}
+
+// --- Mouse events ---
+cv.addEventListener('mousedown', e => {
+  if (e.button === 1) {
+    // Middle mouse: pan
+    e.preventDefault();
+    panning = true;
+    panStart = [e.clientX, e.clientY];
+    panViewStart = [viewX, viewY];
+    return;
+  }
+
+  let rect = cv.getBoundingClientRect();
+  let mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  if (e.button === 0) {
+    // Left click
+    if (mode !== 'idle') {
+      // Confirm grab
+      confirmGrab();
+      return;
+    }
+    // Select point
+    let idx = findPoint(mx, my);
+    if (idx >= 0) {
+      activeIdx = idx;
+      setStatus(`Point ${idx} selected. Press G to grab.`);
+    } else {
+      activeIdx = -1;
+      setStatus('Select a point, then G to grab.');
+    }
+    updateList(); draw();
+  }
+});
+
+cv.addEventListener('mousemove', e => {
+  let rect = cv.getBoundingClientRect();
+  let mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  grabMouse = [mx, my];
+
+  if (panning) {
+    viewX = panViewStart[0] + (e.clientX - panStart[0]);
+    viewY = panViewStart[1] + (e.clientY - panStart[1]);
+    draw();
+    return;
+  }
+
+  if (mode !== 'idle') {
+    if (!numActive) applyGrab(mx, my);
+    return;
+  }
+
+  // Hover
+  let idx = findPoint(mx, my);
+  if (idx !== hoverIdx) {
+    hoverIdx = idx;
+    cv.style.cursor = idx >= 0 ? 'pointer' : 'crosshair';
+    draw();
+  }
+});
+
+cv.addEventListener('mouseup', e => {
+  if (e.button === 1) panning = false;
+});
+
+cv.addEventListener('mouseleave', () => {
+  if (mode === 'idle') { hoverIdx = -1; draw(); }
+});
+
+// Right-click: insert on edge (idle) or cancel grab
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (mode !== 'idle') {
+    cancelGrab();
+    return;
+  }
+  let rect = cv.getBoundingClientRect();
+  let mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let [wx, wy] = toWorld(mx, my);
+  wx = snap(wx); wy = snap(wy);
+  let bestDist = Infinity, bestIdx = points.length;
+  for (let i = 0; i < points.length; i++) {
+    let j = (i + 1) % points.length;
+    let [x1, y1] = getEffective(points[i]);
+    let [x2, y2] = getEffective(points[j]);
+    let [s1, t1] = toScreen(x1, y1);
+    let [s2, t2] = toScreen(x2, y2);
+    let d = distToSegment(mx, my, s1, t1, s2, t2);
+    if (d < bestDist) { bestDist = d; bestIdx = i + 1; }
+  }
+  saveUndo();
+  points.splice(bestIdx, 0, [wx, wy]);
+  activeIdx = bestIdx;
+  updateList(); updateCode(); draw();
+  setStatus(`Inserted point ${bestIdx}. Press G to grab.`);
+});
+
+// --- Keyboard events ---
+window.addEventListener('keydown', e => {
+  // Cmd+Z / Ctrl+Z undo, Cmd+Shift+Z / Ctrl+Shift+Z / Ctrl+Y redo
+  if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+    if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      e.preventDefault(); undo(); return;
+    }
+    if ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y') {
+      e.preventDefault(); redo(); return;
+    }
+  }
+
+  // Don't capture when typing in sidebar inputs
+  if (e.target.tagName === 'INPUT') return;
+
+  let key = e.key;
+  let kl = key.toLowerCase();
+
+  // --- Numeric input during grab ---
+  // In free grab, typing a digit auto-locks to X first
+  if (mode === 'grab' && /^[0-9.\-]$/.test(key)) {
+    mode = 'grab-x';
+    numInput = ''; numActive = false;
+    setStatus('Auto-locked X. Type value, Tab to switch to Y.');
+  }
+  if (mode === 'grab-x' || mode === 'grab-y') {
+    // Digits, dot, minus → start/append numeric input
+    if (/^[0-9]$/.test(key) || key === '.' || key === '-') {
+      // Validate: only one dot, minus only at start
+      if (key === '.' && numInput.includes('.')) { e.preventDefault(); return; }
+      if (key === '-' && numInput.length > 0) { e.preventDefault(); return; }
+      numInput += key;
+      numActive = true;
+      let val = parseFloat(numInput);
+      if (!isNaN(val)) applyNumValue(val);
+      updateHUD();
+      e.preventDefault();
+      return;
+    }
+    // Backspace in numeric mode → delete last char
+    if (kl === 'backspace' && numActive) {
+      numInput = numInput.slice(0, -1);
+      if (numInput === '' || numInput === '-') {
+        // Revert to original while buffer is empty
+        if (activeIdx >= 0) {
+          points[activeIdx][0] = grabOrigPt[0];
+          points[activeIdx][1] = grabOrigPt[1];
+          updateList(); updateCode(); draw();
+        }
+        if (numInput === '') numActive = false;
+      } else {
+        let val = parseFloat(numInput);
+        if (!isNaN(val)) applyNumValue(val);
+      }
+      updateHUD();
+      e.preventDefault();
+      return;
+    }
+    // Tab → switch axis, keep numeric value
+    if (kl === 'tab') {
+      e.preventDefault();
+      let val = numActive ? parseFloat(numInput) : NaN;
+      // Apply current value to current axis before switching
+      if (numActive && !isNaN(val)) applyNumValue(val);
+      // Switch axis
+      mode = mode === 'grab-x' ? 'grab-y' : 'grab-x';
+      numInput = '';
+      numActive = false;
+      updateHUD();
+      if (!numActive) applyGrab(grabMouse[0], grabMouse[1]);
+      draw();
+      return;
+    }
+  }
+
+  // G key
+  if (kl === 'g') {
+    if (mode === 'idle') {
+      startGrab();
+    } else {
+      mode = 'grab';
+      numInput = ''; numActive = false;
+      updateHUD();
+      applyGrab(grabMouse[0], grabMouse[1]);
+      setStatus('G: free move.');
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // X key — lock axis or start typing with axis
+  if (kl === 'x') {
+    if (mode !== 'idle') {
+      if (mode === 'grab-x' && !numActive) {
+        mode = 'grab';
+        setStatus('G: free move.');
+      } else {
+        mode = 'grab-x';
+        numInput = ''; numActive = false;
+        setStatus('X axis locked. Type a value or move mouse.');
+      }
+      updateHUD();
+      if (!numActive) applyGrab(grabMouse[0], grabMouse[1]);
+    }
+    e.preventDefault();
+    return;
+  }
+
+  if (kl === 'y') {
+    if (mode !== 'idle') {
+      if (mode === 'grab-y' && !numActive) {
+        mode = 'grab';
+        setStatus('G: free move.');
+      } else {
+        mode = 'grab-y';
+        numInput = ''; numActive = false;
+        setStatus('Y axis locked. Type a value or move mouse.');
+      }
+      updateHUD();
+      if (!numActive) applyGrab(grabMouse[0], grabMouse[1]);
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // Enter → confirm (numeric or mouse)
+  if (kl === 'enter') {
+    if (mode !== 'idle') {
+      if (numActive && numInput) {
+        let val = parseFloat(numInput);
+        if (!isNaN(val)) applyNumValue(val);
+      }
+      confirmGrab();
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // Escape → cancel
+  if (kl === 'escape') {
+    if (mode !== 'idle') { cancelGrab(); e.preventDefault(); }
+    return;
+  }
+
+  // Delete / Backspace (idle)
+  if ((kl === 'delete' || kl === 'backspace') && mode === 'idle') {
+    if (activeIdx >= 0 && points.length > 3) {
+      saveUndo();
+      points.splice(activeIdx, 1);
+      if (activeIdx >= points.length) activeIdx = points.length - 1;
+      updateList(); updateCode(); draw();
+      setStatus(`Deleted. ${points.length} points remaining.`);
+    }
+    e.preventDefault();
+    return;
+  }
+});
+
+// Pan
+let panning = false, panStart = [0, 0], panViewStart = [0, 0];
+window.addEventListener('mousemove', e => {
+  if (panning) {
+    viewX = panViewStart[0] + (e.clientX - panStart[0]);
+    viewY = panViewStart[1] + (e.clientY - panStart[1]);
+    draw();
+  }
+});
+window.addEventListener('mouseup', e => { if (e.button === 1) panning = false; });
+
+// Zoom
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (mode !== 'idle') return; // no zoom during grab
+  let rect = cv.getBoundingClientRect();
+  let mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let [wx, wy] = toWorld(mx, my);
+  let factor = e.deltaY > 0 ? 0.9 : 1.1;
+  viewScale *= factor;
+  viewX = mx - wx * viewScale;
+  viewY = my + wy * viewScale;
+  draw();
+}, { passive: false });
+
+// --- Point list UI ---
+function updateList() {
+  const list = document.getElementById('point-list');
+  list.innerHTML = '';
+  points.forEach((p, i) => {
+    let isBx = p[0] === null;
+    let row = document.createElement('div');
+    row.className = 'point-row' + (i === activeIdx ? ' active' : '');
+    row.draggable = true;
+    row.dataset.idx = i;
+    row.innerHTML = `
+      <span class="drag-handle" title="Drag to reorder">&#x2630;</span>
+      <span class="idx">${i}</span>
+      <label style="color:${isBx ? '#00d2ff' : '#aaa'}">
+        <input type="checkbox" ${isBx ? 'checked' : ''} data-i="${i}" class="bx-check" title="Use bx"> bx
+      </label>
+      <input type="number" step="0.05" value="${isBx ? bx : p[0].toFixed(2)}" data-i="${i}" class="x-in" ${isBx ? 'disabled' : ''}>
+      <input type="number" step="0.1" value="${p[1].toFixed(1)}" data-i="${i}" class="z-in">
+      <span class="order-btns">
+        <button class="order-btn" data-i="${i}" data-dir="-1" title="Move up">&#9650;</button>
+        <button class="order-btn" data-i="${i}" data-dir="1" title="Move down">&#9660;</button>
+      </span>
+      <button class="del-btn" data-i="${i}" title="Delete point">&times;</button>
+    `;
+    row.addEventListener('click', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      activeIdx = i; updateList(); draw();
+      setStatus(`Point ${i} selected. Press G to grab.`);
+    });
+
+    // Drag-and-drop reorder
+    row.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', i);
+      e.dataTransfer.effectAllowed = 'move';
+      row.style.opacity = '0.4';
+    });
+    row.addEventListener('dragend', () => { row.style.opacity = ''; });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      let rect = row.getBoundingClientRect();
+      let mid = rect.top + rect.height / 2;
+      row.classList.remove('drag-over-top', 'drag-over-bot');
+      row.classList.add(e.clientY < mid ? 'drag-over-top' : 'drag-over-bot');
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('drag-over-top', 'drag-over-bot');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('drag-over-top', 'drag-over-bot');
+      let from = +e.dataTransfer.getData('text/plain');
+      let rect = row.getBoundingClientRect();
+      let mid = rect.top + rect.height / 2;
+      let to = e.clientY < mid ? i : i + 1;
+      if (from === to || from + 1 === to) return;
+      saveUndo();
+      let pt = points.splice(from, 1)[0];
+      let insertAt = from < to ? to - 1 : to;
+      points.splice(insertAt, 0, pt);
+      activeIdx = insertAt;
+      updateList(); updateCode(); draw();
+    });
+
+    list.appendChild(row);
+  });
+
+  // Up/Down buttons
+  list.querySelectorAll('.order-btn').forEach(el => {
+    el.addEventListener('click', e => {
+      let i = +e.target.dataset.i;
+      let dir = +e.target.dataset.dir;
+      let j = i + dir;
+      if (j < 0 || j >= points.length) return;
+      saveUndo();
+      [points[i], points[j]] = [points[j], points[i]];
+      activeIdx = j;
+      updateList(); updateCode(); draw();
+    });
+  });
+
+  list.querySelectorAll('.x-in').forEach(el => {
+    el.addEventListener('change', e => {
+      let i = +e.target.dataset.i;
+      if (points[i][0] !== null) { saveUndo(); points[i][0] = +e.target.value; updateCode(); draw(); }
+    });
+  });
+  list.querySelectorAll('.z-in').forEach(el => {
+    el.addEventListener('change', e => {
+      let i = +e.target.dataset.i;
+      saveUndo(); points[i][1] = +e.target.value; updateCode(); draw();
+    });
+  });
+  list.querySelectorAll('.del-btn').forEach(el => {
+    el.addEventListener('click', e => {
+      let i = +e.target.dataset.i;
+      if (points.length <= 3) return;
+      saveUndo();
+      points.splice(i, 1);
+      if (activeIdx >= points.length) activeIdx = points.length - 1;
+      updateList(); updateCode(); draw();
+    });
+  });
+  list.querySelectorAll('.bx-check').forEach(el => {
+    el.addEventListener('change', e => {
+      let i = +e.target.dataset.i;
+      saveUndo();
+      points[i][0] = e.target.checked ? null : bx;
+      updateList(); updateCode(); draw();
+    });
+  });
+}
+
+function updateCode() {
+  const out = document.getElementById('code-output');
+  let lines = points.map((p, i) => {
+    let xStr = p[0] === null ? 'bx' : p[0].toFixed(2).replace(/\.?0+$/, '');
+    let zStr = p[1].toFixed(1).replace(/\.?0+$/, '');
+    xStr = xStr.padStart(6);
+    zStr = zStr.padStart(5);
+    return `        [${xStr}, ${zStr}]${i < points.length - 1 ? ',' : ''}`;
+  });
+  out.textContent = `    polygon(points = [\n${lines.join('\n')}\n    ]);`;
+}
+
+function addPoint() {
+  saveUndo();
+  let insertAt = activeIdx >= 0 ? activeIdx + 1 : points.length;
+  let ref = activeIdx >= 0 ? activeIdx : Math.max(0, points.length - 1);
+  let ep = points.length > 0 ? getEffective(points[ref]) : [bx, 10];
+  let np = [ep[0] + 2, ep[1]];
+  points.splice(insertAt, 0, np);
+  activeIdx = insertAt;
+  fitView(); updateList(); updateCode(); draw();
+  setStatus(`Inserted point ${insertAt}. Press G to grab.`);
+}
+
+function resetPoints() {
+  saveUndo();
+  bx = 24;
+  document.getElementById('bx-input').value = bx;
+  points = [
+    [null, 7], [26.15, 11], [26.15, 26.4], [17.85, 26.4],
+    [17.85, 25.3], [21.85, 25.3], [21.85, 14], [null, 14],
+  ];
+  activeIdx = -1; mode = 'idle'; updateHUD();
+  fitView(); updateList(); updateCode(); draw();
+}
+
+function copyCode() {
+  navigator.clipboard.writeText(document.getElementById('code-output').textContent).then(() => {
+    setStatus('Copied!');
+    setTimeout(() => setStatus('Select a point, then G to grab.'), 2000);
+  });
+}
+
+document.getElementById('bx-input').addEventListener('change', e => {
+  saveUndo();
+  bx = +e.target.value;
+  fitView(); updateList(); updateCode(); draw();
+});
+
+window.addEventListener('resize', resize);
+cv.focus();
+resize();
+updateList();
+updateCode();
+</script>
+</body>
+</html>
