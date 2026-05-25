@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>OpenSCAD Polygon Editor</title>
+<title>OpenSCAD Polygon Generator</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'SF Mono', 'Menlo', monospace; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; }
@@ -106,7 +106,7 @@ canvas { background: #0f0f23; border: 1px solid #333; }
 <div id="mode-hud"></div>
 
 <div id="sidebar">
-  <h2>OpenSCAD Polygon Editor</h2>
+  <h2>OpenSCAD Polygon Generator</h2>
   <div class="param-row">
     <label>bx =</label>
     <input type="number" id="bx-input" value="24" step="0.05">
@@ -123,13 +123,14 @@ canvas { background: #0f0f23; border: 1px solid #333; }
   <div id="code-output"></div>
   <div id="shortcut-help">
     <span class="key">Click</span> Select &nbsp;
+    <span class="key">DblClick</span> Insert on edge &nbsp;
+    <span class="key">RMB Drag</span> Pan<br>
     <span class="key">G</span> Grab &nbsp;
     <span class="key">X</span> Lock X &nbsp;
     <span class="key">Y</span> Lock Y &nbsp;
     <span class="key">Enter</span> / <span class="key">Click</span> Confirm<br>
     <span class="key">Esc</span> / <span class="key">RMB</span> Cancel &nbsp;
     <span class="key">Del</span> Delete &nbsp;
-    <span class="key">RMB</span> Insert on edge &nbsp;
     <span class="key">Scroll</span> Zoom<br>
     <span class="key">0-9</span> <span class="key">.</span> <span class="key">-</span> Type offset (in G+X / G+Y) &nbsp;
     <span class="key">Tab</span> Switch axis<br>
@@ -540,10 +541,15 @@ function cancelGrab() {
 
 // --- Mouse events ---
 cv.addEventListener('mousedown', e => {
-  if (e.button === 1) {
-    // Middle mouse: pan
+  if (e.button === 2) {
+    // Right mouse: pan
     e.preventDefault();
+    if (mode !== 'idle') {
+      // Cancel grab on right click (without drag)
+      panDidMove = false;
+    }
     panning = true;
+    panDidMove = false;
     panStart = [e.clientX, e.clientY];
     panViewStart = [viewX, viewY];
     return;
@@ -599,20 +605,24 @@ cv.addEventListener('mousemove', e => {
 });
 
 cv.addEventListener('mouseup', e => {
-  if (e.button === 1) panning = false;
+  if (e.button === 2) {
+    if (panning && !panDidMove && mode !== 'idle') {
+      cancelGrab();
+    }
+    panning = false;
+  }
 });
 
 cv.addEventListener('mouseleave', () => {
   if (mode === 'idle') { hoverIdx = -1; draw(); }
 });
 
-// Right-click: insert on edge (idle) or cancel grab
-cv.addEventListener('contextmenu', e => {
-  e.preventDefault();
-  if (mode !== 'idle') {
-    cancelGrab();
-    return;
-  }
+// Prevent context menu on canvas
+cv.addEventListener('contextmenu', e => { e.preventDefault(); });
+
+// Double-click: insert on nearest edge
+cv.addEventListener('dblclick', e => {
+  if (mode !== 'idle') return;
   let rect = cv.getBoundingClientRect();
   let mx = e.clientX - rect.left, my = e.clientY - rect.top;
   let [wx, wy] = toWorld(mx, my);
@@ -793,15 +803,22 @@ window.addEventListener('keydown', e => {
 });
 
 // Pan
-let panning = false, panStart = [0, 0], panViewStart = [0, 0];
+let panning = false, panDidMove = false, panStart = [0, 0], panViewStart = [0, 0];
 window.addEventListener('mousemove', e => {
   if (panning) {
-    viewX = panViewStart[0] + (e.clientX - panStart[0]);
-    viewY = panViewStart[1] + (e.clientY - panStart[1]);
+    let dx = e.clientX - panStart[0], dy = e.clientY - panStart[1];
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) panDidMove = true;
+    viewX = panViewStart[0] + dx;
+    viewY = panViewStart[1] + dy;
     draw();
   }
 });
-window.addEventListener('mouseup', e => { if (e.button === 1) panning = false; });
+window.addEventListener('mouseup', e => {
+  if (e.button === 2) {
+    if (panning && !panDidMove && mode !== 'idle') cancelGrab();
+    panning = false;
+  }
+});
 
 // Zoom
 cv.addEventListener('wheel', e => {
